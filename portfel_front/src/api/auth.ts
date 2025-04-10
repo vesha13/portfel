@@ -1,8 +1,7 @@
 import axios from 'axios';
 import { store } from '../store';
 import { loginSuccess } from '../store/authSlice';
-
-const API_URL = 'http://localhost:8000/';
+import { API_URL } from '../config';
 
 export const login = async (username: string, password: string) => {
     try {

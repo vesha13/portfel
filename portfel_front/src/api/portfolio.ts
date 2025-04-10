@@ -1,32 +1,15 @@
-import axios from 'axios';
 import { createAsyncThunk } from '@reduxjs/toolkit';
+import axiosInstance from './axios';
+import { Portfolio } from '../types';
 
-interface ApiError {
-    response?: {
-        data: any;
-        status: number;
-        headers: any;
-    };
-    request?: any;
-    message: string;
-}
-
-export const fetchPortfolio = createAsyncThunk(
+export const fetchPortfolio = createAsyncThunk<Portfolio[]>(
     'portfolio/fetchPortfolio',
     async (_, { rejectWithValue }) => {
         try {
-            const response = await axios.get('/api/ports/');
+            const response = await axiosInstance.get('/ports/');
             return response.data;
-        } catch (error: unknown) {
-            if (axios.isAxiosError(error)) {
-                // Обработка ошибок Axios
-                return rejectWithValue(error.response?.data || error.message);
-            } else if (error instanceof Error) {
-                // Обработка обычных ошибок
-                return rejectWithValue(error.message);
-            }
-            // Обработка всех остальных случаев
-            return rejectWithValue('Неизвестная ошибка');
+        } catch (error: any) {
+            return rejectWithValue(error.response?.data?.message || error.message);
         }
     }
 );

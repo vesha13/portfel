@@ -1,8 +1,9 @@
 import { createSlice, PayloadAction } from '@reduxjs/toolkit';
 import { fetchPortfolio } from '../api/portfolio';
+import { Portfolio } from '../types';
 
 interface PortfolioState {
-    portfolios: any[];
+    portfolios: Portfolio[];
     loading: boolean;
     error: string | null;
 }
@@ -23,7 +24,7 @@ const portfolioSlice = createSlice({
                 state.loading = true;
                 state.error = null;
             })
-            .addCase(fetchPortfolio.fulfilled, (state, action: PayloadAction<any[]>) => {
+            .addCase(fetchPortfolio.fulfilled, (state, action: PayloadAction<Portfolio[]>) => {
                 state.loading = false;
                 state.portfolios = action.payload;
             })

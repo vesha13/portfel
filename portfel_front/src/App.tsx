@@ -10,7 +10,6 @@ import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
 import DashboardPage from './pages/DashboardPage';
 import PortfolioPage from './pages/PortfolioPage';
-//import AnalyticsPage from './pages/AnalyticsPage';
 import PrivateRoute from './components/PrivateRoute';
 import Header from './components/Layout/Header';
 
@@ -24,10 +23,8 @@ const App: React.FC = () => {
                     <Routes>
                         <Route path="/login" element={<LoginPage />} />
                         <Route path="/register" element={<RegisterPage />} />
-
                         <Route path="/" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
                         <Route path="/portfolio" element={<PrivateRoute><PortfolioPage /></PrivateRoute>} />
-
                         <Route path="*" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
                     </Routes>
                 </Router>

@@ -49,5 +49,10 @@ class DealSourceViewSet(viewsets.ModelViewSet):
     serializer_class = DealSourceSerializer
 
 
+class PortfolioAssetsViewSet(viewsets.ReadOnlyModelViewSet):
+    serializer_class = PortfolioAssetsSerializer
 
+    def get_queryset(self):
+        portfolio_id = self.kwargs['portfolio_id']
+        return PortfolioAssets.objects.filter(portfolio_id=portfolio_id)
 
