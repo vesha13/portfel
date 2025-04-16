@@ -1,43 +1,45 @@
 from django.db import models
+from django.contrib.auth import get_user_model
 
-#Описание всех таблиц
+User = get_user_model()
 class AssetTypes(models.Model):
     Type_ID = models.AutoField(primary_key=True)
     name = models.CharField(max_length=255)
-    risk_level = models.IntegerField() #Уровень риска (низкий, средний, высокий) от 0 до 2, например
-    liquidity = models.IntegerField() #Ликвидность (высокая, средняя, низкая)
-    # product = models.ForeignKey(Items, models.DO_NOTHING, db_column='product')
+    risk_level = models.IntegerField()
+    liquidity = models.IntegerField()
 
     class Meta:
         managed = True
         db_table = 'asset_types'
 
 class Assets(models.Model):
-    Asset_ID = models.IntegerField(primary_key=True)
+    Asset_ID = models.AutoField(primary_key=True)
     ISIN = models.CharField(max_length=255)
     ticker = models.CharField(max_length=255)
     company = models.CharField(max_length=255)
     country = models.CharField(max_length=255)
     region = models.CharField(max_length=255)
-    exchange = models.CharField(max_length=255) #Биржа (NYSE, MOEX и т. д.)
-    market = models.CharField(max_length=255) #Рынок (фондовый, облигационный и т. д.)
-    trading_type = models.CharField(max_length=255) #Тип торгов
-    management_fee = models.DecimalField (max_digits=5, decimal_places=2) #Комиссия управляющей компании (если применимо)
+    exchange = models.CharField(max_length=255)
+    market = models.CharField(max_length=255)
+    trading_type = models.CharField(max_length=255)
+    management_fee = models.DecimalField (max_digits=5, decimal_places=2)
     currency = models.CharField(max_length=255)
     description = models.TextField()
-    dividend_yield = models.DecimalField (max_digits=5, decimal_places=2) # Доходность дивидендов (в процентах)
-    pe_ratio = models.DecimalField(max_digits=10, decimal_places=2) #P/E (соотношение цены к прибыли)
-    pb_ratio = models.DecimalField(max_digits=10, decimal_places=2)  # P/B (цена/балансовая стоимость)
-    beta = models.DecimalField(max_digits=5, decimal_places=2) #Бета-коэффициент (волатильность)
-    asset_type_id = models.ForeignKey(AssetTypes, models.DO_NOTHING, db_column='asset_type')
+    dividend_yield = models.DecimalField (max_digits=5, decimal_places=2)
+    pe_ratio = models.DecimalField(max_digits=10, decimal_places=2)
+    pb_ratio = models.DecimalField(max_digits=10, decimal_places=2)
+    beta = models.DecimalField(max_digits=5, decimal_places=2)
+    current_price = models.DecimalField(
+        max_digits=12, decimal_places=4, null=True, blank=True
+    )
+    asset_type = models.ForeignKey(AssetTypes, on_delete=models.PROTECT) # Изменено с DO_NOTHING и asset_type_id
 
     class Meta:
         managed = True
         db_table = 'assets'
 
-
 class AuthUser(models.Model):
-    id = models.IntegerField(primary_key=True)
+    id = models.AutoField(primary_key=True)
     password = models.CharField(max_length=128)
     last_login = models.DateTimeField(blank=True, null=True)
     username = models.CharField(unique=True, max_length=150)
@@ -54,43 +56,42 @@ class AuthUser(models.Model):
 
 class Portfolios(models.Model):
     Port_ID = models.AutoField(primary_key=True)
-    user_id = models.ForeignKey(AuthUser, on_delete=models.CASCADE)
+    user = models.ForeignKey(User, on_delete=models.CASCADE)
     name = models.CharField(max_length=255)
-    total_value = models.IntegerField()
-    profit_loss = models.DecimalField(max_digits=5, decimal_places=2) #Текущая прибыль/убыток
-    yield_percent = models.DecimalField(max_digits=5, decimal_places=2) #Доходность в %
-    annual_yield = models.DecimalField(max_digits=5, decimal_places=2) #Годовая доходность (XIRR)
+    total_value = models.IntegerField(default=0)
+    profit_loss = models.DecimalField(max_digits=10, decimal_places=2, default=0)
+    yield_percent = models.DecimalField(max_digits=7, decimal_places=4, default=0)
+    annual_yield = models.DecimalField(max_digits=7, decimal_places=4, default=0)
     created_at = models.DateTimeField(auto_now_add=True)
-    class Meta:
-        managed = True
-        db_table = 'portfolios'
 
-#Связка активов и портфелей, чтобы один актив мог принадлежать разным портфелям
+    class Meta:
+        db_table = 'portfolios'
 
 class PortfolioAssets(models.Model):
     ID = models.AutoField(primary_key=True)
-    user_id = models.ForeignKey(AuthUser, on_delete=models.CASCADE)
-    portfolio_id = models.ForeignKey(Portfolios, on_delete=models.CASCADE)
-    quantity = models.DecimalField(max_digits=5, decimal_places=2)
-    average_price = models.DecimalField(max_digits=5, decimal_places=2) #Средняя цена покупки
-    total_value = models.DecimalField(max_digits=5, decimal_places=2) #Общая стоимость
+    portfolio = models.ForeignKey(Portfolios, on_delete=models.CASCADE) # Изменено с portfolio_id
+    asset = models.ForeignKey(Assets, on_delete=models.PROTECT) # Добавлено поле связи с Assets
+    quantity = models.DecimalField(max_digits=15, decimal_places=4) # Увеличена точность
+    average_price = models.DecimalField(max_digits=12, decimal_places=4) # Увеличена точность, оставляем по запросу
+    total_value = models.DecimalField(max_digits=15, decimal_places=2) # Увеличена точность, оставляем по запросу
 
     class Meta:
         managed = True
         db_table = 'portfolios_assets'
+        unique_together = ('portfolio', 'asset') # Добавлено ограничение уникальности
 
 class Deals(models.Model):
     Deal_ID = models.AutoField(primary_key=True)
-    portfolio_id = models.ForeignKey(Portfolios, on_delete=models.CASCADE)
-    asset_id = models.ForeignKey(Assets, on_delete=models.CASCADE)
+    portfolio = models.ForeignKey(Portfolios, on_delete=models.CASCADE) # Изменено с portfolio_id
+    asset = models.ForeignKey(Assets, on_delete=models.PROTECT) # Изменено с asset_id и CASCADE
     address = models.CharField(max_length=255)
     status = models.CharField(max_length=255)
-    type = models.BooleanField(blank=True) #Покупка/продажа 0/1
-    quantity = models.DecimalField(max_digits=5, decimal_places=2)
-    price = models.DecimalField(max_digits=5, decimal_places=2)
-    total = models.DecimalField(max_digits=5, decimal_places=2)
-    commission = models.DecimalField(max_digits=5, decimal_places=2) # комиссия брокера
-    tax = models.DecimalField(max_digits=5, decimal_places=2) # налог
+    type = models.BooleanField(blank=True)
+    quantity = models.DecimalField(max_digits=15, decimal_places=4) # Увеличена точность
+    price = models.DecimalField(max_digits=12, decimal_places=4) # Увеличена точность
+    total = models.DecimalField(max_digits=15, decimal_places=2) # Увеличена точность, оставляем по запросу
+    commission = models.DecimalField(max_digits=10, decimal_places=2) # Увеличена точность
+    tax = models.DecimalField(max_digits=10, decimal_places=2) # Увеличена точность
     date = models.DateTimeField()
 
     class Meta:
@@ -106,4 +107,3 @@ class DealSource(models.Model):
     class Meta:
         managed = True
         db_table = 'deal_sources'
-

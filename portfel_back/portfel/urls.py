@@ -1,17 +1,19 @@
 from django.contrib import admin
 from django.urls import path, include
-from portfel_online import views as all_views
+from portfel_online import views
 
 from rest_framework import routers
 
 from portfel_online.views import PortfolioAssetsViewSet
 
 router = routers.DefaultRouter()
-router.register(r'users', all_views.AuthUserViewSet)
-router.register(r'deals', all_views.DealsViewSet)
-router.register(r'ports', all_views.PortfoliosViewSet)
-router.register(r'assets', all_views.AssetsViewSet)
-router.register(r'portfolios/(?P<portfolio_id>\d+)/assets', PortfolioAssetsViewSet, basename='portfolio-assets')
+router.register(r'asset-types', views.AssetTypesViewSet)
+router.register(r'deal-sources', views.DealSourceViewSet)
+router.register(r'assets', views.AssetsViewSet)
+router.register(r'portfolios', views.PortfoliosViewSet, basename='portfolio') # basename важен для get_queryset
+router.register(r'portfolio-assets', views.PortfolioAssetsViewSet, basename='portfolioasset')
+router.register(r'deals', views.DealsViewSet, basename='deal')
+router.register(r'users', views.AuthUserViewSet)
 
 
 

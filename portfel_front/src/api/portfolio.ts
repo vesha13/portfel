@@ -1,15 +1,33 @@
-import { createAsyncThunk } from '@reduxjs/toolkit';
-import axiosInstance from './axios';
-import { Portfolio } from '../types';
+import { apiClient } from './index';
+import { Portfolio, PortfolioAsset } from '../types/portfolio';
 
-export const fetchPortfolio = createAsyncThunk<Portfolio[]>(
-    'portfolio/fetchPortfolio',
-    async (_, { rejectWithValue }) => {
-        try {
-            const response = await axiosInstance.get('/ports/');
-            return response.data;
-        } catch (error: any) {
-            return rejectWithValue(error.response?.data?.message || error.message);
-        }
-    }
-);
+export const portfolioApi = {
+    getPortfolios: async (): Promise<Portfolio[]> => {
+        const response = await apiClient.get('/portfolios/');
+        return response.data;
+    },
+
+    createPortfolio: async (name: string): Promise<Portfolio> => {
+        const response = await apiClient.post('/portfolios/', { name });
+        return response.data;
+    },
+
+    getPortfolioAssets: async (portfolioId: number): Promise<PortfolioAsset[]> => {
+        const response = await apiClient.get(`/portfolios/${portfolioId}/assets/`);
+        return response.data;
+    },
+
+    deletePortfolio: async (portfolioId: number) => {
+        await apiClient.delete(`/portfolios/${portfolioId}/`);
+    },
+
+    updatePortfolio: async (portfolio: Portfolio): Promise<Portfolio> => {
+        const response = await apiClient.put(
+            `/portfolios/${portfolio.Port_ID}/`,
+            portfolio
+        );
+        return response.data;
+    },
+};
+
+export {};

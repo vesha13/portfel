@@ -1,36 +1,36 @@
-import React from 'react';
-import { BrowserRouter as Router, Route, Routes } from 'react-router-dom';
-import { Provider } from 'react-redux';
-import { ThemeProvider } from '@mui/material/styles';
+import {BrowserRouter as Router, Route, Routes} from 'react-router-dom';
+import {Provider} from 'react-redux';
+import {ThemeProvider} from '@mui/material/styles';
+import Header from './components/Layout/Header';
+import Dashboard from './pages/Dashboard';
+import {store} from "./store/store";
 import CssBaseline from '@mui/material/CssBaseline';
 import theme from './theme';
-import { store } from './store';
+// import PortfolioDetail from './pages/PortfolioDetail';
+import AuthPage from './pages/Auth';
+import PortfolioDetail from './pages/PortfolioPage'
+import AssetDetailPage from './pages/AssetDetailPage';
+import UserProfile from './pages/UserProfile';
 
-import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
-import DashboardPage from './pages/DashboardPage';
-import PortfolioPage from './pages/PortfolioPage';
-import PrivateRoute from './components/PrivateRoute';
-import Header from './components/Layout/Header';
-
-const App: React.FC = () => {
+function App() {
     return (
         <Provider store={store}>
-            <ThemeProvider theme={theme}>
-                <CssBaseline />
-                <Router>
-                    <Header />
-                    <Routes>
-                        <Route path="/login" element={<LoginPage />} />
-                        <Route path="/register" element={<RegisterPage />} />
-                        <Route path="/" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
-                        <Route path="/portfolio" element={<PrivateRoute><PortfolioPage /></PrivateRoute>} />
-                        <Route path="*" element={<PrivateRoute><DashboardPage /></PrivateRoute>} />
-                    </Routes>
-                </Router>
-            </ThemeProvider>
+            {/*<ThemeProvider theme={theme}>*/}
+            <CssBaseline/>
+            <Router>
+                <Header/>
+                <Routes>
+                    <Route index element={<Dashboard/>}/>
+                    <Route path="portfolio/:id" element={<PortfolioDetail />} />
+                    <Route path="/login" element={<AuthPage type="login"/>}/>
+                    <Route path="/register" element={<AuthPage type="register"/>}/>
+                    <Route path="/assets/:assetId" element={<AssetDetailPage />} />
+                    <Route path="/profile" element={<UserProfile />} />
+                </Routes>
+            </Router>
+            {/*</ThemeProvider>*/}
         </Provider>
     );
-};
+}
 
 export default App;

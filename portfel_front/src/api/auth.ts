@@ -1,41 +1,33 @@
-import axios from 'axios';
-import { store } from '../store';
-import { loginSuccess } from '../store/authSlice';
-import { API_URL } from '../config';
+import {apiClient} from './index';
+import {User} from '../types/portfolio';
+import axios from "axios";
+import {API_URL} from "../config";
 
-export const login = async (username: string, password: string) => {
-    try {
-        const response = await axios.post(API_URL + 'auth/jwt/create/', {
-            username,
-            password,
-        });
-
-        const { data: userData } = await axios.get(API_URL + 'auth/users/me/', {
-            headers: {
-                Authorization: `JWT ${response.data.access}`,
-            },
-        });
-
-        store.dispatch(loginSuccess({
-            token: response.data.access,
-            user: userData,
-        }));
-
+export const authApi = {
+    login: async (credentials: { username: string; password: string }) => {
+        const response = await apiClient.post('/auth/jwt/create/', credentials);
         return response.data;
-    } catch (error) {
-        throw new Error('Ошибка авторизации');
-    }
+    },
+
+    register: async (userData: {
+        username: string;
+        email: string;
+        password: string;
+    }) => {
+        const response = await axios.post(API_URL + '/auth/users/', userData);
+        return response.data;
+    },
+
+    getMe: async (): Promise<User> => {
+        const response = await apiClient.get('/auth/users/me/');
+        return response.data;
+    },
+
+    refreshToken: async () => {
+        const refresh = localStorage.getItem('refresh_token');
+        const response = await apiClient.post('/auth/jwt/refresh/', {refresh});
+        return response.data;
+    },
 };
 
-export const register = async (username: string, email: string, password: string) => {
-    try {
-        const response = await axios.post(API_URL + 'auth/users/', {
-            username,
-            email,
-            password,
-        });
-        return response.data;
-    } catch (error) {
-        throw new Error('Ошибка регистрации');
-    }
-};
+export {};
