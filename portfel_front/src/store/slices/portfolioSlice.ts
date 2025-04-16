@@ -1,3 +1,4 @@
+// src/store/slices/portfolioSlice.ts
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import { portfolioApi } from '../../api/portfolio';
 import { apiClient } from '../../api/index';
@@ -8,7 +9,9 @@ interface PortfolioState {
     currentPortfolio: Portfolio | null;
     allAssets: Asset[];
     status: 'idle' | 'loading' | 'succeeded' | 'failed';
+    assetDeletionStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
     error: string | null;
+    assetDeletionError: string | null;
 }
 
 const initialState: PortfolioState = {
@@ -16,7 +19,9 @@ const initialState: PortfolioState = {
     currentPortfolio: null,
     allAssets: [],
     status: 'idle',
+    assetDeletionStatus: 'idle',
     error: null,
+    assetDeletionError: null,
 };
 
 export const fetchPortfolios = createAsyncThunk(
@@ -106,7 +111,7 @@ export const addAssetToPortfolio = createAsyncThunk(
                 portfolio: portfolioId,
                 asset_id: assetId,
                 quantity,
-                price: price // Pass purchase price if backend needs it for avg price calc
+                price: price
             });
             return response.data;
         } catch (error: any) {
@@ -125,6 +130,28 @@ export const addAssetToPortfolio = createAsyncThunk(
     }
 );
 
+export const deleteAssetFromPortfolio = createAsyncThunk(
+    'portfolio/deleteAsset',
+    async (portfolioAssetId: number, { rejectWithValue }) => {
+        try {
+            await portfolioApi.deletePortfolioAsset(portfolioAssetId);
+            return portfolioAssetId;
+        } catch (error: any) {
+            const backendErrors = error.response?.data;
+            let message = 'Failed to delete asset from portfolio';
+            if (typeof backendErrors === 'object' && backendErrors !== null) {
+                message = Object.values(backendErrors).flat().join(' ') || message;
+            } else if (typeof backendErrors === 'string') {
+                message = backendErrors;
+            } else if (error.message) {
+                message = error.message;
+            }
+            console.error("Delete Asset Error Response:", error.response);
+            return rejectWithValue(message);
+        }
+    }
+);
+
 
 const portfolioSlice = createSlice({
     name: 'portfolio',
@@ -135,6 +162,7 @@ const portfolioSlice = createSlice({
         },
         clearPortfolioError: (state) => {
             state.error = null;
+            state.assetDeletionError = null;
         }
     },
     extraReducers: (builder) => {
@@ -191,6 +219,7 @@ const portfolioSlice = createSlice({
             .addCase(fetchPortfolioDetails.pending, (state) => {
                 state.status = 'loading';
                 state.error = null;
+                state.assetDeletionError = null;
             })
             .addCase(fetchPortfolioDetails.fulfilled, (state, action) => {
                 state.status = 'succeeded';
@@ -208,19 +237,29 @@ const portfolioSlice = createSlice({
             })
             .addCase(fetchAllAssets.rejected, (state, action) => {
                 console.error("Failed to fetch all assets:", action.payload);
-                state.error = action.payload as string;
             })
             .addCase(addAssetToPortfolio.pending, (state) => {
                 state.status = 'loading';
                 state.error = null;
+                state.assetDeletionError = null;
             })
             .addCase(addAssetToPortfolio.fulfilled, (state, action) => {
-                // No need to manually update state here, PortfolioDetail refetches
                 state.status = 'succeeded';
             })
             .addCase(addAssetToPortfolio.rejected, (state, action) => {
                 state.status = 'failed';
                 state.error = action.payload as string;
+            })
+            .addCase(deleteAssetFromPortfolio.pending, (state) => {
+                state.assetDeletionStatus = 'loading';
+                state.assetDeletionError = null;
+            })
+            .addCase(deleteAssetFromPortfolio.fulfilled, (state, action) => {
+                state.assetDeletionStatus = 'succeeded';
+            })
+            .addCase(deleteAssetFromPortfolio.rejected, (state, action) => {
+                state.assetDeletionStatus = 'failed';
+                state.assetDeletionError = action.payload as string;
             });
     },
 });

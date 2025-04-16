@@ -44,13 +44,18 @@ export interface Asset {
 
 export interface Deal {
     Deal_ID: number;
-    portfolio: number;
-    asset: Asset;
-    type: 'buy' | 'sell';
-    quantity: number;
-    price: number;
-    total: number;
-    date: string;
+    portfolio: number; // ID портфеля
+    asset: number;     // ID актива (как приходит из DealsSerializer)
+    asset_ticker?: string; // Тикер актива (read_only из DealsSerializer)
+    address: string;
+    status: string;
+    type: boolean; // true=BUY, false=SELL
+    quantity: string; // Используем строку, т.к. DecimalField может приходить как строка
+    price: string;
+    total: string;
+    commission: string;
+    tax: string;
+    date: string; // Дата в виде строки ISO
 }
 
 export interface User {

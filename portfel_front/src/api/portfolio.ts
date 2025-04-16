@@ -28,6 +28,10 @@ export const portfolioApi = {
         );
         return response.data;
     },
+
+    deletePortfolioAsset: async (portfolioAssetId: number): Promise<void> => {
+        await apiClient.delete(`/portfolio-assets/${portfolioAssetId}/`);
+    },
 };
 
 export {};

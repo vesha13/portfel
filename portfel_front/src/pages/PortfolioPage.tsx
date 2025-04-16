@@ -1,13 +1,15 @@
-import React, {useEffect, useState} from 'react';
-import {useParams, useNavigate} from 'react-router-dom';
-import {useAppDispatch, useAppSelector} from '../store/hooks';
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { useAppDispatch, useAppSelector } from '../store/hooks';
 import {
     fetchPortfolioDetails,
     addAssetToPortfolio,
     fetchAllAssets,
-    clearPortfolioError
+    clearPortfolioError,
+    deleteAssetFromPortfolio
 } from '../store/slices/portfolioSlice';
-import {Asset, PortfolioAsset} from '../types/portfolio';
+import { fetchPortfolioDeals, addNewDeal } from '../store/slices/dealsSlice';
+import { Asset, PortfolioAsset, Deal } from '../types/portfolio';
 import {
     Button,
     CircularProgress,
@@ -29,10 +31,18 @@ import {
     TextField,
     Autocomplete,
     Box,
-    Alert
+    Alert,
+    Select,
+    MenuItem,
+    InputLabel,
+    FormControl,
+    DialogContentText
 } from '@mui/material';
-import {Add, Visibility} from '@mui/icons-material';
+import { Add, Visibility, Delete as DeleteIcon } from '@mui/icons-material';
+import { AdapterDateFns } from '@mui/x-date-pickers/AdapterDateFnsV3';
+import { LocalizationProvider, DateTimePicker } from '@mui/x-date-pickers';
 import PortfolioChart from '../components/PortfolioChart';
+import { format } from 'date-fns';
 
 const formatNumber = (value: string | number | null | undefined, decimals: number = 2): string => {
     if (value == null) return 'N/A';
@@ -42,345 +52,622 @@ const formatNumber = (value: string | number | null | undefined, decimals: numbe
 };
 
 const PortfolioDetail = () => {
-    const {id} = useParams<{ id: string }>();
+    const { id } = useParams<{ id: string }>();
     const dispatch = useAppDispatch();
     const navigate = useNavigate();
 
     const {
         currentPortfolio,
         allAssets,
-        status,
-        error
+        status: portfolioStatus,
+        assetDeletionStatus,
+        error: portfolioError,
+        assetDeletionError,
     } = useAppSelector((state) => state.portfolio);
 
-    const [showAddForm, setShowAddForm] = useState(false);
+    const {
+        deals,
+        status: dealsStatus,
+        error: dealsError,
+    } = useAppSelector((state) => state.deals);
+
+    const [showAddAssetForm, setShowAddAssetForm] = useState(false);
     const [selectedAsset, setSelectedAsset] = useState<Asset | null>(null);
-    const [quantity, setQuantity] = useState('');
-    const [price, setPrice] = useState('');
+    const [assetQuantity, setAssetQuantity] = useState('');
+    const [assetPrice, setAssetPrice] = useState('');
+
+    const [showAddDealForm, setShowAddDealForm] = useState(false);
+    const [selectedDealAsset, setSelectedDealAsset] = useState<Asset | null>(null);
+    const [dealType, setDealType] = useState<boolean | string>('');
+    const [dealQuantity, setDealQuantity] = useState('');
+    const [dealPrice, setDealPrice] = useState('');
+    const [dealDate, setDealDate] = useState<Date | null>(new Date());
+    const [dealCommission, setDealCommission] = useState('');
+    const [dealTax, setDealTax] = useState('');
+
+    const [showDeleteConfirmDialog, setShowDeleteConfirmDialog] = useState(false);
+    const [assetToDelete, setAssetToDelete] = useState<PortfolioAsset | null>(null);
 
     useEffect(() => {
         dispatch(clearPortfolioError());
         if (id) {
-            dispatch(fetchPortfolioDetails(Number(id)));
+            const portfolioId = Number(id);
+            dispatch(fetchPortfolioDetails(portfolioId));
             dispatch(fetchAllAssets());
+            dispatch(fetchPortfolioDeals(portfolioId));
         }
     }, [dispatch, id]);
 
-    const handleCloseDialog = () => {
-        setShowAddForm(false);
+    const handleCloseAddAssetDialog = () => {
+        setShowAddAssetForm(false);
         setSelectedAsset(null);
-        setQuantity('');
-        setPrice('');
+        setAssetQuantity('');
+        setAssetPrice('');
     };
 
-    const handleAddAsset = async () => {
-        if (selectedAsset && quantity && price && currentPortfolio) {
+    const handleAddAssetSubmit = async () => {
+        if (selectedAsset && assetQuantity && assetPrice && currentPortfolio) {
             const resultAction = await dispatch(addAssetToPortfolio({
                 portfolioId: currentPortfolio.Port_ID,
                 assetId: selectedAsset.Asset_ID,
-                quantity: parseFloat(quantity),
-                price: parseFloat(price) // Sending purchase price for potential backend use
+                quantity: parseFloat(assetQuantity),
+                price: parseFloat(assetPrice)
             }));
-
             if (addAssetToPortfolio.fulfilled.match(resultAction)) {
-                handleCloseDialog();
+                handleCloseAddAssetDialog();
                 if (id) {
-                    dispatch(fetchPortfolioDetails(Number(id))); // Refetch details to update view
+                    dispatch(fetchPortfolioDetails(Number(id)));
+                    dispatch(fetchPortfolioDeals(Number(id))); // Also refetch deals
                 }
             } else {
-                // Error is handled by the slice and displayed via state.error
-                // You might want to keep the dialog open on error
                 console.error("Failed to add asset:", resultAction.payload);
             }
         }
     };
 
-    if (status === 'loading' && !currentPortfolio && !error) { // Show loading only on initial load without error
+    const handleCloseAddDealDialog = () => {
+        setShowAddDealForm(false);
+        setSelectedDealAsset(null);
+        setDealType('');
+        setDealQuantity('');
+        setDealPrice('');
+        setDealDate(new Date());
+        setDealCommission('');
+        setDealTax('');
+    };
+
+    const handleAddDealSubmit = async () => {
+        if (selectedDealAsset && dealType !== '' && dealQuantity && dealPrice && dealDate && currentPortfolio) {
+            const dealData: Omit<Deal, 'Deal_ID' | 'portfolio' | 'asset_ticker' | 'address' | 'status' | 'total'> & { asset: number; type: boolean} = {
+                asset: selectedDealAsset.Asset_ID,
+                type: dealType === 'buy',
+                quantity: dealQuantity,
+                price: dealPrice,
+                commission: dealCommission || '0',
+                tax: dealTax || '0',
+                date: dealDate.toISOString(),
+            };
+            const resultAction = await dispatch(addNewDeal({
+                portfolioId: currentPortfolio.Port_ID,
+                dealData: dealData as any
+            }));
+            if (addNewDeal.fulfilled.match(resultAction)) {
+                handleCloseAddDealDialog();
+                if (id) {
+                    dispatch(fetchPortfolioDetails(Number(id)));
+                    dispatch(fetchPortfolioDeals(Number(id)));
+                }
+            } else {
+                console.error("Failed to add deal:", resultAction.payload);
+            }
+        }
+    };
+
+    const handleDeleteDeal = async (dealId: number) => {
+        console.warn(`Delete functionality for deal ${dealId} not implemented yet.`);
+    };
+
+    const openDeleteAssetConfirm = (portfolioAsset: PortfolioAsset) => {
+        setAssetToDelete(portfolioAsset);
+        setShowDeleteConfirmDialog(true);
+    };
+
+    const closeDeleteAssetConfirm = () => {
+        setAssetToDelete(null);
+        setShowDeleteConfirmDialog(false);
+    };
+
+    const handleConfirmDeleteAsset = async () => {
+        if (assetToDelete && id) {
+            const portfolioAssetId = assetToDelete.ID;
+            closeDeleteAssetConfirm();
+            try {
+                await dispatch(deleteAssetFromPortfolio(portfolioAssetId)).unwrap();
+                dispatch(fetchPortfolioDetails(Number(id)));
+                dispatch(fetchPortfolioDeals(Number(id)));
+            } catch (err) {
+                console.error("Failed to delete asset:", err);
+            }
+        }
+    };
+
+    const isLoading = portfolioStatus === 'loading' || dealsStatus === 'loading';
+    const isDeletingAsset = assetDeletionStatus === 'loading';
+    const hasInitialError = (portfolioStatus === 'failed' && portfolioError && !currentPortfolio) || (dealsStatus === 'failed' && dealsError && !deals);
+
+    if (isLoading && !currentPortfolio) {
         return (
             <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
-                <CircularProgress/>
+                <CircularProgress />
             </Box>
         );
     }
 
-    // Handle error during initial load specifically
-    if (status === 'failed' && error && !currentPortfolio) {
+    if (hasInitialError) {
         return (
-            <Container maxWidth="lg" sx={{mt: 4, mb: 4}}>
-                <Alert severity="error">Error loading portfolio details: {error}</Alert>
+            <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+                {portfolioStatus === 'failed' && portfolioError && !currentPortfolio && (
+                    <Alert severity="error" sx={{ mb: 2 }}>Error loading portfolio details: {portfolioError}</Alert>
+                )}
+                {dealsStatus === 'failed' && dealsError && !deals && (
+                    <Alert severity="error" sx={{ mb: 2 }}>Error loading deals: {dealsError}</Alert>
+                )}
+                <Typography>Unable to load portfolio data.</Typography>
             </Container>
         );
     }
 
-    // Handle case where loading finished but portfolio is still null (e.g., 404)
-    if (status !== 'loading' && !currentPortfolio) {
+    if (portfolioStatus !== 'loading' && !currentPortfolio) {
         return (
-            <Container maxWidth="lg" sx={{mt: 4, mb: 4}}>
+            <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
                 <Typography>Portfolio not found or unable to load.</Typography>
             </Container>
         );
     }
 
-    // If currentPortfolio is somehow null despite checks, show loading as fallback
     if (!currentPortfolio) {
         return (
             <Box display="flex" justifyContent="center" alignItems="center" minHeight="80vh">
-                <CircularProgress/>
+                <CircularProgress />
             </Box>
         );
     }
 
-
     const portfolioProfitLossNum = currentPortfolio.profit_loss != null ? parseFloat(String(currentPortfolio.profit_loss)) : NaN;
 
     return (
-        <Container maxWidth="lg" sx={{mt: 4, mb: 4}}>
-            {/* Display persistent errors (like add asset failure) */}
-            {status === 'failed' && error && <Alert severity="error" sx={{mb: 2}}>{error}</Alert>}
+        <LocalizationProvider dateAdapter={AdapterDateFns}>
+            <Container maxWidth="lg" sx={{ mt: 4, mb: 4 }}>
+                {portfolioStatus === 'failed' && portfolioError && <Alert severity="error" sx={{ mb: 2 }}>{portfolioError}</Alert>}
+                {dealsStatus === 'failed' && dealsError && <Alert severity="error" sx={{ mb: 2 }}>{dealsError}</Alert>}
+                {assetDeletionStatus === 'failed' && assetDeletionError && <Alert severity="error" sx={{ mb: 2 }}>Failed to delete asset: {assetDeletionError}</Alert>}
 
-            <Grid container spacing={3}>
-                <Grid item xs={12}>
-                    <Paper sx={{
-                        p: 2,
-                        display: 'flex',
-                        flexDirection: {xs: 'column', sm: 'row'},
-                        justifyContent: 'space-between',
-                        alignItems: 'center',
-                        gap: 2
-                    }}>
-                        <Typography variant="h4" component="h1">{currentPortfolio.name}</Typography>
-                        <Button
-                            variant="contained"
-                            startIcon={(status === 'loading' && showAddForm) ?
-                                <CircularProgress size={20} color="inherit"/> : <Add/>} // Loader only when adding
-                            onClick={() => setShowAddForm(true)}
-                            disabled={status === 'loading'} // Disable if any loading is happening
-                        >
-                            Add Asset
-                        </Button>
-                    </Paper>
-                </Grid>
+                <Grid container spacing={3}>
+                    <Grid item xs={12}>
+                        <Paper sx={{ p: 2, display: 'flex', flexDirection: { xs: 'column', sm: 'row' }, justifyContent: 'space-between', alignItems: 'center', gap: 2 }}>
+                            <Typography variant="h4" component="h1">{currentPortfolio.name}</Typography>
+                            <Box>
+                                <Button
+                                    variant="contained"
+                                    startIcon={<Add />}
+                                    onClick={() => setShowAddDealForm(true)}
+                                    disabled={isLoading}
+                                    sx={{ mr: 1 }}
+                                >
+                                    Add Deal
+                                </Button>
+                                <Button
+                                    variant="contained"
+                                    color="secondary"
+                                    startIcon={<Add />}
+                                    onClick={() => setShowAddAssetForm(true)}
+                                    disabled={isLoading}
+                                >
+                                    Add Asset Position
+                                </Button>
+                            </Box>
+                        </Paper>
+                    </Grid>
 
-                <Grid item xs={12} md={8} lg={9}>
-                    <Paper sx={{p: 2, display: 'flex', flexDirection: 'column', height: 400}}>
-                        <Typography variant="h6" gutterBottom>Portfolio Performance</Typography>
-                        {currentPortfolio.portfolio_assets && currentPortfolio.portfolio_assets.length > 0 ? (
-
-                            <PortfolioChart/>
-                        ) : (
-                            <Typography
-                                sx={{flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
-                                Add assets to see the chart.
+                    <Grid item xs={12} md={8} lg={9}>
+                        <Paper sx={{p: 2, display: 'flex', flexDirection: 'column', height: 400}}>
+                            <Typography variant="h6" gutterBottom>Portfolio Performance</Typography>
+                            {currentPortfolio.portfolio_assets && currentPortfolio.portfolio_assets.length > 0 ? (
+                                <PortfolioChart  />
+                            ) : (
+                                <Typography sx={{flexGrow: 1, display: 'flex', alignItems: 'center', justifyContent: 'center'}}>
+                                    Add assets to see the chart.
+                                </Typography>
+                            )}
+                        </Paper>
+                    </Grid>
+                    <Grid item xs={12} md={4} lg={3}>
+                        <Paper sx={{p: 2, height: '100%'}}>
+                            <Typography variant="h6" gutterBottom>Statistics</Typography>
+                            <Typography>Total Value: ${formatNumber(currentPortfolio.total_value)}</Typography>
+                            <Typography color={isNaN(portfolioProfitLossNum) ? 'text.primary' : portfolioProfitLossNum >= 0 ? 'success.main' : 'error.main'}>
+                                P/L: ${formatNumber(currentPortfolio.profit_loss)}
                             </Typography>
-                        )}
-                    </Paper>
-                </Grid>
+                            <Typography>Yield: {formatNumber(currentPortfolio.yield_percent)}%</Typography>
+                        </Paper>
+                    </Grid>
 
-                <Grid item xs={12} md={4} lg={3}>
-                    <Paper sx={{p: 2, height: '100%'}}>
-                        <Typography variant="h6" gutterBottom>Statistics</Typography>
-                        <Typography>Total Value: ${formatNumber(currentPortfolio.total_value)}</Typography>
-                        <Typography
-                            color={isNaN(portfolioProfitLossNum) ? 'text.primary' : portfolioProfitLossNum >= 0 ? 'success.main' : 'error.main'}>
-                            P/L: ${formatNumber(currentPortfolio.profit_loss)}
-                        </Typography>
-                        <Typography>Annual Yield: ${formatNumber(currentPortfolio.annual_yield)}</Typography>
-                        <Typography>Yield: {formatNumber(currentPortfolio.yield_percent)}%</Typography>
-                    </Paper>
-                </Grid>
+                    <Grid item xs={12}>
+                        <Paper sx={{ p: 2, overflow: 'hidden' }}>
+                            <Typography variant="h6" gutterBottom>Portfolio Assets</Typography>
+                            <TableContainer sx={{ maxHeight: 440 }}>
+                                <Table stickyHeader>
+                                    <TableHead>
+                                        <TableRow>
+                                            <TableCell>Ticker</TableCell>
+                                            <TableCell>Company</TableCell>
+                                            <TableCell align="right">Quantity</TableCell>
+                                            <TableCell align="right">Avg Price</TableCell>
+                                            <TableCell align="right">Current Price</TableCell>
+                                            <TableCell align="right">Total Value</TableCell>
+                                            <TableCell align="right">P/L ($)</TableCell>
+                                            <TableCell align="right">Actions</TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {currentPortfolio?.portfolio_assets?.length > 0 ? (
+                                            currentPortfolio.portfolio_assets.map((pa) => {
+                                                const avgPriceNum = pa.average_price != null ? parseFloat(String(pa.average_price)) : NaN;
+                                                const currentPriceNum = pa.asset?.current_price != null ? parseFloat(String(pa.asset.current_price)) : NaN;
+                                                const quantityNum = pa.quantity != null ? parseFloat(String(pa.quantity)) : NaN;
+                                                const currentValue = !isNaN(currentPriceNum) && !isNaN(quantityNum) ? currentPriceNum * quantityNum : NaN;
+                                                const costBasis = !isNaN(avgPriceNum) && !isNaN(quantityNum) ? avgPriceNum * quantityNum : NaN;
+                                                const profitLoss = !isNaN(currentValue) && !isNaN(costBasis) ? currentValue - costBasis : NaN;
+                                                const isDeletingCurrent = isDeletingAsset && assetToDelete?.ID === pa.ID;
 
-                <Grid item xs={12}>
-                    <Paper sx={{p: 2, overflow: 'hidden'}}>
-                        <Typography variant="h6" gutterBottom>Portfolio Assets</Typography>
-                        <TableContainer sx={{maxHeight: 440}}>
-                            <Table stickyHeader>
-                                <TableHead>
-                                    <TableRow>
-                                        <TableCell>Ticker</TableCell>
-                                        <TableCell>Company</TableCell>
-                                        <TableCell align="right">Quantity</TableCell>
-                                        <TableCell align="right">Avg Price</TableCell>
-                                        <TableCell align="right">Current Price</TableCell>
-                                        <TableCell align="right">Total Value</TableCell>
-                                        <TableCell align="right">P/L ($)</TableCell>
-                                        <TableCell align="right">Actions</TableCell>
-                                    </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                    {currentPortfolio.portfolio_assets?.length > 0 ? (
-                                        currentPortfolio.portfolio_assets.map((pa: PortfolioAsset) => {
-                                            if (!pa.asset) return <TableRow key={`pa-${pa.ID}-missing`}><TableCell
-                                                colSpan={8}>Asset data missing for ID {pa.ID}</TableCell></TableRow>;
+                                                if (!pa.asset) return <TableRow key={`pa-${pa.ID}-missing`}><TableCell colSpan={8}>Asset data missing for ID {pa.ID}</TableCell></TableRow>;
 
-                                            const avgPriceNum = pa.average_price != null ? parseFloat(String(pa.average_price)) : NaN;
-                                            const currentPriceNum = pa.asset.current_price != null ? parseFloat(String(pa.asset.current_price)) : NaN;
-                                            const quantityNum = pa.quantity != null ? parseFloat(String(pa.quantity)) : NaN;
+                                                return (
+                                                    <TableRow hover key={`pa-${pa.ID}`} sx={isDeletingCurrent ? { opacity: 0.5 } : {}}>
+                                                        <TableCell>{pa.asset.ticker}</TableCell>
+                                                        <TableCell>{pa.asset.company}</TableCell>
+                                                        <TableCell align="right">{formatNumber(pa.quantity, 4)}</TableCell>
+                                                        <TableCell align="right">${formatNumber(pa.average_price)}</TableCell>
+                                                        <TableCell align="right">${formatNumber(pa.asset.current_price)}</TableCell>
+                                                        <TableCell align="right">${formatNumber(currentValue)}</TableCell>
+                                                        <TableCell align="right" sx={{color: isNaN(profitLoss) ? 'text.primary' : profitLoss >= 0 ? 'success.main' : 'error.main'}}>
+                                                            ${formatNumber(profitLoss)}
+                                                        </TableCell>
+                                                        <TableCell align="right">
+                                                            <IconButton
+                                                                aria-label="view asset details"
+                                                                size="small"
+                                                                onClick={() => navigate(`/assets/${pa.asset.Asset_ID}`)}
+                                                                disabled={isDeletingCurrent}
+                                                            >
+                                                                <Visibility fontSize="small" />
+                                                            </IconButton>
+                                                            <IconButton
+                                                                aria-label="delete asset position"
+                                                                size="small"
+                                                                color="error"
+                                                                onClick={() => openDeleteAssetConfirm(pa)}
+                                                                disabled={isDeletingAsset}
+                                                            >
+                                                                {isDeletingCurrent ? <CircularProgress size={20} color="inherit" /> : <DeleteIcon fontSize="small" />}
+                                                            </IconButton>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                );
+                                            })
+                                        ) : (
+                                            <TableRow>
+                                                <TableCell colSpan={8} align="center">No assets in this portfolio yet.</TableCell>
+                                            </TableRow>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        </Paper>
+                    </Grid>
 
-                                            const currentValue = !isNaN(currentPriceNum) && !isNaN(quantityNum) ? currentPriceNum * quantityNum : NaN;
-                                            const costBasis = !isNaN(avgPriceNum) && !isNaN(quantityNum) ? avgPriceNum * quantityNum : NaN;
-                                            const profitLoss = !isNaN(currentValue) && !isNaN(costBasis) ? currentValue - costBasis : NaN;
-
-                                            return (
-                                                <TableRow hover key={`pa-${pa.ID}`}>
-                                                    <TableCell>{pa.asset.ticker}</TableCell>
-                                                    <TableCell>{pa.asset.company}</TableCell>
-                                                    <TableCell align="right">{formatNumber(pa.quantity, 4)}</TableCell>
-                                                    <TableCell
-                                                        align="right">${formatNumber(pa.average_price)}</TableCell>
-                                                    <TableCell
-                                                        align="right">${formatNumber(pa.asset.current_price)}</TableCell>
-                                                    <TableCell align="right">${formatNumber(currentValue)}</TableCell>
-                                                    <TableCell
-                                                        align="right"
-                                                        sx={{color: isNaN(profitLoss) ? 'text.primary' : profitLoss >= 0 ? 'success.main' : 'error.main'}}
-                                                    >
-                                                        ${formatNumber(profitLoss)}
-                                                    </TableCell>
-                                                    <TableCell align="right">
-                                                        <IconButton
-                                                            aria-label="view asset details"
-                                                            size="small"
-                                                            onClick={() => navigate(`/assets/${pa.asset.Asset_ID}`)}
-                                                        >
-                                                            <Visibility/>
-                                                        </IconButton>
+                    <Grid item xs={12}>
+                        <Paper sx={{ p: 2, overflow: 'hidden' }}>
+                            <Typography variant="h6" gutterBottom>Portfolio Deals</Typography>
+                            {dealsStatus === 'loading' && (
+                                <Box sx={{ display: 'flex', justifyContent: 'center', my: 2 }}><CircularProgress /></Box>
+                            )}
+                            {dealsStatus !== 'loading' && deals && (
+                                <TableContainer sx={{ maxHeight: 440 }}>
+                                    <Table stickyHeader>
+                                        <TableHead>
+                                            <TableRow>
+                                                <TableCell>Date</TableCell>
+                                                <TableCell>Ticker</TableCell>
+                                                <TableCell>Type</TableCell>
+                                                <TableCell align="right">Quantity</TableCell>
+                                                <TableCell align="right">Price</TableCell>
+                                                <TableCell align="right">Total</TableCell>
+                                                <TableCell align="right">Commission</TableCell>
+                                                <TableCell align="right">Actions</TableCell>
+                                            </TableRow>
+                                        </TableHead>
+                                        <TableBody>
+                                            {deals.length > 0 ? (
+                                                deals.map((deal: Deal) => (
+                                                    <TableRow hover key={`deal-${deal.Deal_ID}`}>
+                                                        <TableCell>{deal.date ? format(new Date(deal.date), 'yyyy-MM-dd HH:mm') : 'N/A'}</TableCell>
+                                                        <TableCell>{deal.asset_ticker || 'N/A'}</TableCell>
+                                                        <TableCell>
+                                                            <Typography variant="body2" sx={{ color: deal.type ? 'success.main' : 'error.main', fontWeight: 'bold' }}>
+                                                                {deal.type ? 'BUY' : 'SELL'}
+                                                            </Typography>
+                                                        </TableCell>
+                                                        <TableCell align="right">{formatNumber(deal.quantity, 4)}</TableCell>
+                                                        <TableCell align="right">${formatNumber(deal.price)}</TableCell>
+                                                        <TableCell align="right">${formatNumber(deal.total)}</TableCell>
+                                                        <TableCell align="right">${formatNumber(deal.commission)}</TableCell>
+                                                        <TableCell align="right">
+                                                            <IconButton
+                                                                aria-label="delete deal"
+                                                                size="small"
+                                                                onClick={() => handleDeleteDeal(deal.Deal_ID)}
+                                                                disabled
+                                                            >
+                                                                <DeleteIcon fontSize="small" />
+                                                            </IconButton>
+                                                        </TableCell>
+                                                    </TableRow>
+                                                ))
+                                            ) : (
+                                                <TableRow>
+                                                    <TableCell colSpan={8} align="center">
+                                                        {dealsStatus === 'failed' ? 'Error loading deals.' : 'No deals recorded for this portfolio yet.'}
                                                     </TableCell>
                                                 </TableRow>
-                                            );
-                                        })
-                                    ) : (
-                                        <TableRow>
-                                            <TableCell colSpan={8} align="center">No assets in this portfolio
-                                                yet.</TableCell>
-                                        </TableRow>
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </TableContainer>
-                    </Paper>
-                </Grid>
+                                            )}
+                                        </TableBody>
+                                    </Table>
+                                </TableContainer>
+                            )}
+                        </Paper>
+                    </Grid>
 
-                <Grid item xs={12}>
-                    <Paper sx={{p: 2, overflow: 'hidden'}}>
-                        <Typography variant="h6" gutterBottom>Available Assets</Typography>
-                        <TableContainer sx={{maxHeight: 440}}>
-                            <Table stickyHeader>
-                                <TableHead>
-                                    <TableRow>
-                                        <TableCell>Ticker</TableCell>
-                                        <TableCell>Company</TableCell>
-                                        <TableCell align="right">Price</TableCell>
-                                        <TableCell align="right">Currency</TableCell>
-                                        <TableCell align="right">Yield (%)</TableCell>
-                                        <TableCell align="right">Actions</TableCell>
-                                    </TableRow>
-                                </TableHead>
-                                <TableBody>
-                                    {allAssets && allAssets.length > 0 ? (
-                                        allAssets.map((asset: Asset) => (
-                                            <TableRow hover key={`asset-${asset.Asset_ID}`}>
-                                                <TableCell>{asset.ticker}</TableCell>
-                                                <TableCell>{asset.company}</TableCell>
-                                                <TableCell
-                                                    align="right">${formatNumber(asset.current_price)}</TableCell>
-                                                <TableCell align="right">{asset.currency}</TableCell>
-                                                <TableCell
-                                                    align="right">{formatNumber(asset.dividend_yield)}%</TableCell>
-                                                <TableCell align="right">
-                                                    <Button
-                                                        variant="outlined"
-                                                        size="small"
-                                                        onClick={() => {
-                                                            setSelectedAsset(asset);
-                                                            setPrice(asset.current_price != null ? String(asset.current_price) : '');
-                                                            setShowAddForm(true);
-                                                        }}
-                                                        disabled={status === 'loading'}
-                                                    >
-                                                        Add to Portfolio
-                                                    </Button>
+                    <Grid item xs={12}>
+                        <Paper sx={{p: 2, overflow: 'hidden'}}>
+                            <Typography variant="h6" gutterBottom>Available Assets</Typography>
+                            <TableContainer sx={{maxHeight: 440}}>
+                                <Table stickyHeader>
+                                    <TableHead>
+                                        <TableRow>
+                                            <TableCell>Ticker</TableCell>
+                                            <TableCell>Company</TableCell>
+                                            <TableCell align="right">Price</TableCell>
+                                            <TableCell align="right">Currency</TableCell>
+                                            <TableCell align="right">Yield (%)</TableCell>
+                                            <TableCell align="right">Actions</TableCell>
+                                        </TableRow>
+                                    </TableHead>
+                                    <TableBody>
+                                        {allAssets && allAssets.length > 0 ? (
+                                            allAssets.map((asset: Asset) => (
+                                                <TableRow hover key={`asset-${asset.Asset_ID}`}>
+                                                    <TableCell>{asset.ticker}</TableCell>
+                                                    <TableCell>{asset.company}</TableCell>
+                                                    <TableCell align="right">${formatNumber(asset.current_price)}</TableCell>
+                                                    <TableCell align="right">{asset.currency}</TableCell>
+                                                    <TableCell align="right">{formatNumber(asset.dividend_yield)}%</TableCell>
+                                                    <TableCell align="right">
+                                                        <Button
+                                                            variant="outlined"
+                                                            size="small"
+                                                            onClick={() => {
+                                                                setSelectedAsset(asset);
+                                                                setAssetPrice(asset.current_price != null ? String(asset.current_price) : '');
+                                                                setShowAddAssetForm(true);
+                                                            }}
+                                                            disabled={isLoading}
+                                                        >
+                                                            Add Position
+                                                        </Button>
+                                                    </TableCell>
+                                                </TableRow>
+                                            ))
+                                        ) : (
+                                            <TableRow>
+                                                <TableCell colSpan={6} align="center">
+                                                    {portfolioStatus === 'loading' ? 'Loading available assets...' : 'No available assets found.'}
                                                 </TableCell>
                                             </TableRow>
-                                        ))
-                                    ) : (
-                                        <TableRow>
-                                            <TableCell colSpan={6} align="center">
-                                                {status === 'loading' && !allAssets ? 'Loading available assets...' : 'No available assets found.'}
-                                            </TableCell>
-                                        </TableRow>
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </TableContainer>
-                    </Paper>
+                                        )}
+                                    </TableBody>
+                                </Table>
+                            </TableContainer>
+                        </Paper>
+                    </Grid>
                 </Grid>
-            </Grid>
 
-            <Dialog open={showAddForm} onClose={handleCloseDialog} maxWidth="sm" fullWidth>
-                <DialogTitle>Add Asset to Portfolio</DialogTitle>
-                <DialogContent>
-                    <Autocomplete
-                        options={allAssets || []}
-                        getOptionLabel={(option) => option ? `${option.ticker} - ${option.company}` : ''}
-                        value={selectedAsset}
-                        onChange={(event, newValue: Asset | null) => {
-                            setSelectedAsset(newValue);
-                            if (newValue) {
-                                setPrice(newValue.current_price != null ? String(newValue.current_price) : '');
-                            } else {
-                                setPrice('');
+                <Dialog open={showAddAssetForm} onClose={handleCloseAddAssetDialog} maxWidth="sm" fullWidth>
+                    <DialogTitle>Add Asset Position</DialogTitle>
+                    <DialogContent>
+                        <Autocomplete
+                            options={allAssets || []}
+                            getOptionLabel={(option) => option ? `${option.ticker} - ${option.company}` : ''}
+                            value={selectedAsset}
+                            onChange={(event, newValue: Asset | null) => {
+                                setSelectedAsset(newValue);
+                                if (newValue) {
+                                    setAssetPrice(newValue.current_price != null ? String(newValue.current_price) : '');
+                                } else {
+                                    setAssetPrice('');
+                                }
+                            }}
+                            isOptionEqualToValue={(option, value) => option?.Asset_ID === value?.Asset_ID}
+                            renderInput={(params) => (
+                                <TextField {...params} label="Select Asset" margin="normal" fullWidth />
+                            )}
+                        />
+                        <TextField
+                            label="Quantity" type="number" fullWidth margin="normal"
+                            value={assetQuantity}
+                            onChange={(e) => setAssetQuantity(e.target.value)}
+                            inputProps={{ min: "0", step: "any" }} required
+                            error={assetQuantity !== '' && (isNaN(parseFloat(assetQuantity)) || parseFloat(assetQuantity) <= 0)}
+                            helperText={assetQuantity !== '' && (isNaN(parseFloat(assetQuantity)) || parseFloat(assetQuantity) <= 0) ? "Quantity must be a positive number" : ""}
+                        />
+                        <TextField
+                            label="Purchase Price per Share" type="number" fullWidth margin="normal"
+                            value={assetPrice}
+                            onChange={(e) => setAssetPrice(e.target.value)}
+                            inputProps={{ min: "0", step: "any" }} required
+                            error={assetPrice !== '' && (isNaN(parseFloat(assetPrice)) || parseFloat(assetPrice) < 0)}
+                            helperText={assetPrice !== '' && (isNaN(parseFloat(assetPrice)) || parseFloat(assetPrice) < 0) ? "Price must be a non-negative number" : ""}
+                        />
+                        {portfolioStatus === 'failed' && portfolioError && showAddAssetForm &&
+                            <Alert severity="error" sx={{ mt: 1 }}>{portfolioError}</Alert>}
+                    </DialogContent>
+                    <DialogActions>
+                        <Button onClick={handleCloseAddAssetDialog}>Cancel</Button>
+                        <Button
+                            onClick={handleAddAssetSubmit}
+                            variant="contained"
+                            disabled={!selectedAsset || !assetQuantity || !assetPrice || isNaN(parseFloat(assetQuantity)) || parseFloat(assetQuantity) <= 0 || isNaN(parseFloat(assetPrice)) || parseFloat(assetPrice) < 0 || portfolioStatus === 'loading'}
+                        >
+                            {portfolioStatus === 'loading' ? <CircularProgress size={24} color="inherit" /> : "Add Position"}
+                        </Button>
+                    </DialogActions>
+                </Dialog>
+
+                <Dialog open={showAddDealForm} onClose={handleCloseAddDealDialog} maxWidth="sm" fullWidth>
+                    <DialogTitle>Add New Deal</DialogTitle>
+                    <DialogContent>
+                        <Autocomplete
+                            options={allAssets || []}
+                            getOptionLabel={(option) => option ? `${option.ticker} - ${option.company}` : ''}
+                            value={selectedDealAsset}
+                            onChange={(event, newValue: Asset | null) => {
+                                setSelectedDealAsset(newValue);
+                                if (newValue && newValue.current_price != null) {
+                                    setDealPrice(String(newValue.current_price));
+                                } else {
+                                    setDealPrice('');
+                                }
+                            }}
+                            isOptionEqualToValue={(option, value) => option?.Asset_ID === value?.Asset_ID}
+                            renderInput={(params) => (
+                                <TextField {...params} label="Select Asset" margin="dense" fullWidth />
+                            )}
+                        />
+                        <FormControl fullWidth margin="dense" required>
+                            <InputLabel id="deal-type-label">Deal Type</InputLabel>
+                            <Select
+                                labelId="deal-type-label"
+                                value={dealType}
+                                label="Deal Type"
+                                onChange={(e) => setDealType(e.target.value as string)}
+                                error={dealType === ''}
+                            >
+                                <MenuItem value="buy">Buy</MenuItem>
+                                <MenuItem value="sell">Sell</MenuItem>
+                            </Select>
+                        </FormControl>
+                        <TextField
+                            label="Quantity" type="number" fullWidth margin="dense"
+                            value={dealQuantity}
+                            onChange={(e) => setDealQuantity(e.target.value)}
+                            inputProps={{ min: "0", step: "any" }} required
+                            error={dealQuantity !== '' && (isNaN(parseFloat(dealQuantity)) || parseFloat(dealQuantity) <= 0)}
+                            helperText={dealQuantity !== '' && (isNaN(parseFloat(dealQuantity)) || parseFloat(dealQuantity) <= 0) ? "Quantity must be a positive number" : ""}
+                        />
+                        <TextField
+                            label="Price per Share" type="number" fullWidth margin="dense"
+                            value={dealPrice}
+                            onChange={(e) => setDealPrice(e.target.value)}
+                            inputProps={{ min: "0", step: "any" }} required
+                            error={dealPrice !== '' && (isNaN(parseFloat(dealPrice)) || parseFloat(dealPrice) < 0)}
+                            helperText={dealPrice !== '' && (isNaN(parseFloat(dealPrice)) || parseFloat(dealPrice) < 0) ? "Price must be a non-negative number" : ""}
+                        />
+                        <DateTimePicker
+                            label="Date and Time"
+                            value={dealDate}
+                            onChange={(newValue) => setDealDate(newValue)}
+                            slotProps={{
+                                textField: {
+                                    fullWidth: true,
+                                    margin: "dense",
+                                    required: true,
+                                    error: !dealDate,
+                                    helperText: !dealDate ? "Date is required" : ""
+                                }
+                            }}
+                        />
+                        <TextField
+                            label="Commission" type="number" fullWidth margin="dense"
+                            value={dealCommission}
+                            onChange={(e) => setDealCommission(e.target.value)}
+                            inputProps={{ min: "0", step: "any" }}
+                            error={dealCommission !== '' && (isNaN(parseFloat(dealCommission)) || parseFloat(dealCommission) < 0)}
+                            helperText={dealCommission !== '' && (isNaN(parseFloat(dealCommission)) || parseFloat(dealCommission) < 0) ? "Commission cannot be negative" : ""}
+                        />
+                        <TextField
+                            label="Tax" type="number" fullWidth margin="dense"
+                            value={dealTax}
+                            onChange={(e) => setDealTax(e.target.value)}
+                            inputProps={{ min: "0", step: "any" }}
+                            error={dealTax !== '' && (isNaN(parseFloat(dealTax)) || parseFloat(dealTax) < 0)}
+                            helperText={dealTax !== '' && (isNaN(parseFloat(dealTax)) || parseFloat(dealTax) < 0) ? "Tax cannot be negative" : ""}
+                        />
+                        {dealsStatus === 'failed' && dealsError && showAddDealForm &&
+                            <Alert severity="error" sx={{ mt: 1 }}>{dealsError}</Alert>}
+                    </DialogContent>
+                    <DialogActions>
+                        <Button onClick={handleCloseAddDealDialog}>Cancel</Button>
+                        <Button
+                            onClick={handleAddDealSubmit}
+                            variant="contained"
+                            disabled={
+                                !selectedDealAsset || dealType === '' || !dealQuantity || !dealPrice || !dealDate ||
+                                isNaN(parseFloat(dealQuantity)) || parseFloat(dealQuantity) <= 0 ||
+                                isNaN(parseFloat(dealPrice)) || parseFloat(dealPrice) < 0 ||
+                                (dealCommission !== '' && (isNaN(parseFloat(dealCommission)) || parseFloat(dealCommission) < 0)) ||
+                                (dealTax !== '' && (isNaN(parseFloat(dealTax)) || parseFloat(dealTax) < 0)) ||
+                                dealsStatus === 'loading'
                             }
-                        }}
-                        isOptionEqualToValue={(option, value) => option?.Asset_ID === value?.Asset_ID}
-                        renderInput={(params) => (
-                            <TextField
-                                {...params}
-                                label="Select Asset"
-                                margin="normal"
-                                fullWidth
-                            />
-                        )}
-                    />
-                    <TextField
-                        label="Quantity"
-                        type="number"
-                        fullWidth
-                        margin="normal"
-                        value={quantity}
-                        onChange={(e) => setQuantity(e.target.value)}
-                        inputProps={{min: "0", step: "any"}}
-                        required
-                        error={quantity !== '' && (isNaN(parseFloat(quantity)) || parseFloat(quantity) <= 0)}
-                        helperText={quantity !== '' && (isNaN(parseFloat(quantity)) || parseFloat(quantity) <= 0) ? "Quantity must be a positive number" : ""}
-                    />
-                    <TextField
-                        label="Purchase Price per Share"
-                        type="number"
-                        fullWidth
-                        margin="normal"
-                        value={price}
-                        onChange={(e) => setPrice(e.target.value)}
-                        inputProps={{min: "0", step: "any"}}
-                        required
-                        error={price !== '' && (isNaN(parseFloat(price)) || parseFloat(price) < 0)}
-                        helperText={price !== '' && (isNaN(parseFloat(price)) || parseFloat(price) < 0) ? "Price must be a non-negative number" : ""}
-                    />
-                    {/* Display error from backend specifically in the dialog */}
-                    {status === 'failed' && error && showAddForm &&
-                        <Alert severity="error" sx={{mt: 1}}>{error}</Alert>}
-                </DialogContent>
-                <DialogActions>
-                    <Button onClick={handleCloseDialog}>Cancel</Button>
-                    <Button
-                        onClick={handleAddAsset}
-                        variant="contained"
-                        disabled={!selectedAsset || !quantity || !price || isNaN(parseFloat(quantity)) || parseFloat(quantity) <= 0 || isNaN(parseFloat(price)) || parseFloat(price) < 0 || status === 'loading'}
-                    >
-                        {status === 'loading' ? <CircularProgress size={24} color="inherit"/> : "Add Asset"}
-                    </Button>
-                </DialogActions>
-            </Dialog>
-        </Container>
+                        >
+                            {dealsStatus === 'loading' ? <CircularProgress size={24} color="inherit" /> : "Add Deal"}
+                        </Button>
+                    </DialogActions>
+                </Dialog>
+
+                <Dialog
+                    open={showDeleteConfirmDialog}
+                    onClose={closeDeleteAssetConfirm}
+                    aria-labelledby="alert-dialog-title"
+                    aria-describedby="alert-dialog-description"
+                >
+                    <DialogTitle id="alert-dialog-title">
+                        Confirm Deletion
+                    </DialogTitle>
+                    <DialogContent>
+                        <DialogContentText id="alert-dialog-description">
+                            Are you sure you want to remove the asset position
+                            "{assetToDelete?.asset?.ticker || 'Unknown'}" ({formatNumber(assetToDelete?.quantity, 4)} units)
+                            from this portfolio? This action cannot be undone and will generate a sell transaction record.
+                        </DialogContentText>
+                    </DialogContent>
+                    <DialogActions>
+                        <Button onClick={closeDeleteAssetConfirm} disabled={isDeletingAsset}>
+                            Cancel
+                        </Button>
+                        <Button
+                            onClick={handleConfirmDeleteAsset}
+                            color="error"
+                            variant="contained"
+                            disabled={isDeletingAsset}
+                            autoFocus
+                        >
+                            {isDeletingAsset ? <CircularProgress size={20} color="inherit"/> : "Delete"}
+                        </Button>
+                    </DialogActions>
+                </Dialog>
+
+            </Container>
+        </LocalizationProvider>
     );
 };
 
