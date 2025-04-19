@@ -1,7 +1,34 @@
+// portfolioSlice.ts
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import { portfolioApi } from '../../api/portfolio';
 import { apiClient } from '../../api/index';
 import { Portfolio, PortfolioAsset, Asset } from '../../types/portfolio';
+
+interface TinkoffPositionBE {
+    figi: string;
+    instrument_type: string;
+    quantity: string | null;
+    average_position_price: string | null;
+    average_position_price_currency: string | null;
+    expected_yield: string | null;
+    current_nkd: string | null;
+    current_nkd_currency: string | null;
+    current_price: string | null;
+    current_price_currency: string | null;
+    quantity_lots: string | null;
+}
+
+interface TinkoffPortfolioDataBE {
+    account_id: string;
+    total_amount_shares: string | null;
+    total_amount_bonds: string | null;
+    total_amount_etf: string | null;
+    total_amount_currencies: string | null;
+    total_amount_futures: string | null;
+    expected_yield: string | null;
+    total_amount_portfolio: string | null;
+    positions: TinkoffPositionBE[];
+}
 
 interface PortfolioState {
     portfolios: Portfolio[];
@@ -11,6 +38,9 @@ interface PortfolioState {
     assetDeletionStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
     error: string | null;
     assetDeletionError: string | null;
+    tinkoffPortfolioData: TinkoffPortfolioDataBE | null;
+    tinkoffStatus: 'idle' | 'loading' | 'succeeded' | 'failed';
+    tinkoffError: string | null;
 }
 
 const initialState: PortfolioState = {
@@ -21,6 +51,9 @@ const initialState: PortfolioState = {
     assetDeletionStatus: 'idle',
     error: null,
     assetDeletionError: null,
+    tinkoffPortfolioData: null,
+    tinkoffStatus: 'idle',
+    tinkoffError: null,
 };
 
 export const fetchPortfolios = createAsyncThunk(
@@ -151,6 +184,28 @@ export const deleteAssetFromPortfolio = createAsyncThunk(
     }
 );
 
+export const fetchTinkoffPortfolio = createAsyncThunk<
+    TinkoffPortfolioDataBE,
+    string,
+    { rejectValue: string }
+    >(
+    'portfolio/fetchTinkoff',
+    async (tinkoffToken, { rejectWithValue }) => {
+        try {
+            const response = await apiClient.post<TinkoffPortfolioDataBE>(`/tinkoff/portfolio/`, {
+                tinkoff_token: tinkoffToken
+            });
+            return response.data;
+        } catch (error: any) {
+            const message = error.response?.data?.error
+                || error.message
+                || 'Failed to fetch Tinkoff portfolio data from server';
+            console.error("Fetch Tinkoff Portfolio Error:", error.response?.data || error);
+            return rejectWithValue(message);
+        }
+    }
+);
+
 
 const portfolioSlice = createSlice({
     name: 'portfolio',
@@ -162,6 +217,11 @@ const portfolioSlice = createSlice({
         clearPortfolioError: (state) => {
             state.error = null;
             state.assetDeletionError = null;
+        },
+        clearTinkoffData: (state) => {
+            state.tinkoffPortfolioData = null;
+            state.tinkoffStatus = 'idle';
+            state.tinkoffError = null;
         }
     },
     extraReducers: (builder) => {
@@ -259,9 +319,22 @@ const portfolioSlice = createSlice({
             .addCase(deleteAssetFromPortfolio.rejected, (state, action) => {
                 state.assetDeletionStatus = 'failed';
                 state.assetDeletionError = action.payload as string;
+            })
+            .addCase(fetchTinkoffPortfolio.pending, (state) => {
+                state.tinkoffStatus = 'loading';
+                state.tinkoffError = null;
+                state.tinkoffPortfolioData = null;
+            })
+            .addCase(fetchTinkoffPortfolio.fulfilled, (state, action) => {
+                state.tinkoffStatus = 'succeeded';
+                state.tinkoffPortfolioData = action.payload;
+            })
+            .addCase(fetchTinkoffPortfolio.rejected, (state, action) => {
+                state.tinkoffStatus = 'failed';
+                state.tinkoffError = action.payload as string;
             });
     },
 });
 
-export const { setCurrentPortfolio, clearPortfolioError } = portfolioSlice.actions;
+export const { setCurrentPortfolio, clearPortfolioError, clearTinkoffData } = portfolioSlice.actions;
 export default portfolioSlice.reducer;

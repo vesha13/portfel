@@ -17,6 +17,19 @@ from .models import (
     AssetTypes, Assets, Portfolios, PortfolioAssets, Deals, DealSource
 )
 
+import grpc # Import grpc
+from rest_framework.views import APIView
+from tinkoff.invest import (
+    Client,
+    # PortfolioRequest, # No longer strictly needed here, but kept for potential future use
+    AccessLevel,
+    InvestError
+)
+# Only import RequestError from exceptions
+from tinkoff.invest.exceptions import (
+    RequestError
+)
+
 User = get_user_model()
 logger = logging.getLogger(__name__)
 
@@ -122,7 +135,6 @@ class PortfolioAssetsViewSet(viewsets.ModelViewSet):
         logger.info(f"Finished recalculating aggregates for Portfolio ID: {portfolio.Port_ID}")
 
     def _create_deal_from_pa_change(self, portfolio_asset, quantity, price, is_buy):
-        """Вспомогательная функция для создания сделки."""
         try:
             total = (quantity * price).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
             Deals.objects.create(
@@ -206,9 +218,7 @@ class PortfolioAssetsViewSet(viewsets.ModelViewSet):
                     portfolio_asset.average_price = new_avg_price.quantize(Decimal("0.0001"))
 
                 portfolio_asset.save(update_fields=['quantity', 'average_price'])
-
                 self._create_deal_from_pa_change(portfolio_asset, quantity_dec, price_dec, is_buy=True)
-                # -------------------------------------------------------
 
             self.recalculate_portfolio_aggregates(portfolio)
 
@@ -223,21 +233,16 @@ class PortfolioAssetsViewSet(viewsets.ModelViewSet):
              return Response({"detail": f"An internal error occurred: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def perform_destroy(self, instance):
-        """Переопределяем для создания сделки продажи перед удалением."""
-        portfolio = instance.portfolio # Получаем портфель ДО удаления
-        asset_ticker = instance.asset.ticker # Получаем тикер ДО удаления
-        quantity_to_sell = instance.quantity # Количество для продажи
-
+        portfolio = instance.portfolio
+        asset_ticker = instance.asset.ticker
+        quantity_to_sell = instance.quantity
         sell_price = instance.average_price or Decimal('0.00')
 
         try:
             self._create_deal_from_pa_change(instance, quantity_to_sell, sell_price, is_buy=False)
-
             instance.delete()
-
             self.recalculate_portfolio_aggregates(portfolio)
             logger.info(f"Deleted PortfolioAsset for {asset_ticker} in portfolio {portfolio.Port_ID} and recalculated aggregates.")
-
         except Exception as e:
             logger.error(f"Error during perform_destroy for PortfolioAsset {instance.ID}: {e}", exc_info=True)
             raise serializers.ValidationError(f"Ошибка при удалении актива и создании сделки: {e}")
@@ -253,7 +258,6 @@ class DealsViewSet(viewsets.ModelViewSet):
 
     def update_portfolio_assets_from_deal(self, deal_instance):
         logger.warning(f"Function update_portfolio_assets_from_deal not fully implemented for Deal ID: {deal_instance.Deal_ID}")
-
         pass
 
     def recalculate_portfolio_aggregates(self, portfolio):
@@ -264,7 +268,6 @@ class DealsViewSet(viewsets.ModelViewSet):
              pa_viewset.recalculate_portfolio_aggregates(portfolio)
          except Exception as e:
              logger.error(f"Failed to recalculate portfolio from DealsViewSet: {e}", exc_info=True)
-
 
     def get_queryset(self):
         portfolio_pk = self.kwargs.get('portfolio_pk')
@@ -285,7 +288,6 @@ class DealsViewSet(viewsets.ModelViewSet):
             deal_instance = serializer.save(portfolio=portfolio)
             self.update_portfolio_assets_from_deal(deal_instance)
             self.recalculate_portfolio_aggregates(portfolio)
-            # -----------------------------------------------------
             logger.info(f"Deal {deal_instance.Deal_ID} created for portfolio {portfolio_pk}. Aggregates updated (TODO: Verify logic).")
         except Portfolios.DoesNotExist:
             raise serializers.ValidationError("Указанный портфель не найден или не принадлежит вам.")
@@ -293,9 +295,141 @@ class DealsViewSet(viewsets.ModelViewSet):
              logger.exception(f"Error creating deal for portfolio {portfolio_pk}")
              raise serializers.ValidationError(f"Ошибка при создании сделки: {e}")
 
-    # TODO: Override perform_update & perform_destroy для сделок
 
 class AuthUserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = AuthUserSerializer
     permission_classes = [permissions.IsAdminUser]
+
+
+def tinkoff_money_to_decimal_string(money_value):
+    if money_value is None:
+        return None
+    if not hasattr(money_value, 'units') or not hasattr(money_value, 'nano'):
+         logger.warning(f"Input object lacks 'units' or 'nano': {money_value}")
+         return None
+    try:
+        fractional = Decimal(money_value.nano) / Decimal(1_000_000_000)
+        total = Decimal(money_value.units) + fractional
+        return str(total)
+    except Exception as e:
+        logger.error(f"Error converting Tinkoff value to Decimal: {money_value}, Error: {e}")
+        return None
+
+class TinkoffPortfolioView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+
+    def post(self, request, *args, **kwargs):
+        tinkoff_token = request.data.get('tinkoff_token')
+
+        if not tinkoff_token:
+            return Response(
+                {"error": "Tinkoff API token is required."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        app_name = "your_app_name.my_portfolio_emulator"
+
+        try:
+            with Client(token=tinkoff_token, app_name=app_name) as client:
+                accounts_response = client.users.get_accounts()
+
+                if not accounts_response.accounts:
+                     return Response(
+                        {"error": "No Tinkoff accounts found for this token."},
+                        status=status.HTTP_404_NOT_FOUND
+                    )
+
+                target_account_id = None
+                for acc in accounts_response.accounts:
+                    if acc.status == 2 and acc.access_level in (
+                        AccessLevel.ACCOUNT_ACCESS_LEVEL_FULL_ACCESS,
+                        AccessLevel.ACCOUNT_ACCESS_LEVEL_READ_ONLY
+                    ):
+                       target_account_id = acc.id
+                       logger.info(f"Found accessible Tinkoff account: {target_account_id} (Access: {acc.access_level.name})")
+                       break
+
+                if not target_account_id:
+                    if accounts_response.accounts:
+                        first_acc = accounts_response.accounts[0]
+                        if first_acc.status == 2: # 2 is ACCOUNT_STATUS_OPEN
+                            target_account_id = first_acc.id
+                            logger.warning(f"No account with full/read-only access found. Trying the first open account: {target_account_id} (Status: {first_acc.status}, Access: {first_acc.access_level.name})")
+                        else:
+                            logger.error(f"First account found ({first_acc.id}) is not open (Status: {first_acc.status}). Cannot proceed.")
+                            return Response(
+                                {"error": "No suitable Tinkoff accounts found (check access level and status)."},
+                                status=status.HTTP_404_NOT_FOUND
+                            )
+                    else:
+                         return Response(
+                            {"error": "No Tinkoff accounts found for this token."},
+                            status=status.HTTP_404_NOT_FOUND
+                        )
+
+                logger.info(f"Fetching Tinkoff portfolio for account ID: {target_account_id}")
+
+                portfolio_response = client.operations.get_portfolio(account_id=target_account_id)
+
+                result_data = {
+                    'account_id': target_account_id,
+                    'total_amount_shares': tinkoff_money_to_decimal_string(portfolio_response.total_amount_shares),
+                    'total_amount_bonds': tinkoff_money_to_decimal_string(portfolio_response.total_amount_bonds),
+                    'total_amount_etf': tinkoff_money_to_decimal_string(portfolio_response.total_amount_etf),
+                    'total_amount_currencies': tinkoff_money_to_decimal_string(portfolio_response.total_amount_currencies),
+                    'total_amount_futures': tinkoff_money_to_decimal_string(portfolio_response.total_amount_futures),
+                    'expected_yield': tinkoff_money_to_decimal_string(portfolio_response.expected_yield),
+                    'total_amount_portfolio': tinkoff_money_to_decimal_string(portfolio_response.total_amount_portfolio),
+                    'positions': [
+                        {
+                            'figi': pos.figi,
+                            'instrument_type': pos.instrument_type,
+                            'quantity': tinkoff_money_to_decimal_string(pos.quantity),
+                            'average_position_price': tinkoff_money_to_decimal_string(pos.average_position_price),
+                            'average_position_price_currency': pos.average_position_price.currency if pos.average_position_price else None,
+                            'expected_yield': tinkoff_money_to_decimal_string(pos.expected_yield),
+                            'current_nkd': tinkoff_money_to_decimal_string(pos.current_nkd),
+                            'current_nkd_currency': pos.current_nkd.currency if pos.current_nkd else None,
+                            'current_price': tinkoff_money_to_decimal_string(pos.current_price),
+                            'current_price_currency': pos.current_price.currency if pos.current_price else None,
+                            'quantity_lots': tinkoff_money_to_decimal_string(pos.quantity_lots),
+                        } for pos in portfolio_response.positions if pos
+                    ],
+                }
+                return Response(result_data, status=status.HTTP_200_OK)
+
+        except RequestError as e:
+            if hasattr(e, 'code') and e.code == grpc.StatusCode.UNAUTHENTICATED:
+                logger.error(f"Tinkoff API Unauthenticated: Code={e.code}, Details='{e.details}'", exc_info=False)
+                error_message = "Authentication failed: Invalid or expired Tinkoff API token."
+                return Response({"error": error_message}, status=status.HTTP_401_UNAUTHORIZED)
+
+            elif hasattr(e, 'code') and e.code == grpc.StatusCode.PERMISSION_DENIED:
+                logger.error(f"Tinkoff API Permission Denied: Code={e.code}, Details='{e.details}'", exc_info=False)
+                error_message = "Permission denied: Token lacks necessary rights for this operation."
+                return Response({"error": error_message}, status=status.HTTP_403_FORBIDDEN)
+
+            elif hasattr(e, 'code') and e.code == grpc.StatusCode.NOT_FOUND:
+                logger.error(f"Tinkoff API Not Found: Code={e.code}, Details='{e.details}'", exc_info=False)
+                error_message = f"Tinkoff resource not found: {e.details}"
+                return Response({"error": error_message}, status=status.HTTP_404_NOT_FOUND)
+
+            else:
+                tracking_id = getattr(e, 'tracking_id', 'N/A')
+                error_code_name = e.code.name if hasattr(e, 'code') and hasattr(e.code, 'name') else 'UNKNOWN'
+                logger.error(f"Tinkoff API RequestError: Code={error_code_name}, Details='{getattr(e, 'details', 'Unknown')}', TrackingID={tracking_id}", exc_info=True)
+                error_message = f"Tinkoff API request error: {getattr(e, 'details', 'An error occurred with the request')} (Code: {error_code_name})"
+                status_code = status.HTTP_502_BAD_GATEWAY if tracking_id != 'N/A' else status.HTTP_500_INTERNAL_SERVER_ERROR
+                return Response({"error": error_message}, status=status_code)
+
+        except InvestError as e:
+             logger.error(f"Tinkoff Invest Library Error: {e}", exc_info=True)
+             return Response({"error": f"Tinkoff SDK Error: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+        except Exception as e:
+            logger.exception("Unexpected error while fetching Tinkoff portfolio")
+            return Response(
+                {"error": f"An unexpected server error occurred: {str(e)}"},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
