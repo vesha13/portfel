@@ -1,5 +1,3 @@
-# portfel_online/views.py
-
 from rest_framework import viewsets, permissions, filters, status
 from rest_framework.response import Response
 from django_filters.rest_framework import DjangoFilterBackend
@@ -7,7 +5,7 @@ from rest_framework import serializers
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
 import logging
 from django.db import transaction
-from django.utils import timezone # <--- Импорт для даты сделки
+from django.utils import timezone
 from django.contrib.auth import get_user_model
 
 from .serializers import (
@@ -23,7 +21,6 @@ User = get_user_model()
 logger = logging.getLogger(__name__)
 
 
-# --- AssetTypesViewSet, DealSourceViewSet, AssetsViewSet - БЕЗ ИЗМЕНЕНИЙ ---
 class AssetTypesViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = AssetTypes.objects.all()
     serializer_class = AssetTypesSerializer
@@ -49,7 +46,6 @@ class AssetsViewSet(viewsets.ReadOnlyModelViewSet):
     ordering_fields = ['ticker', 'company', 'currency', 'asset_type__name']
 
 
-# --- PortfoliosViewSet - БЕЗ ИЗМЕНЕНИЙ ---
 class PortfoliosViewSet(viewsets.ModelViewSet):
     serializer_class = PortfoliosSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -70,7 +66,6 @@ class PortfoliosViewSet(viewsets.ModelViewSet):
         )
 
 
-# --- PortfolioAssetsViewSet - МОДИФИЦИРОВАН create и добавлен perform_destroy ---
 class PortfolioAssetsViewSet(viewsets.ModelViewSet):
     serializer_class = PortfolioAssetsSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -84,7 +79,6 @@ class PortfolioAssetsViewSet(viewsets.ModelViewSet):
         return PortfolioAssets.objects.filter(portfolio_id__in=user_portfolio_ids).select_related('asset', 'portfolio', 'asset__asset_type')
 
     def recalculate_portfolio_aggregates(self, portfolio):
-        # Эта функция остается без изменений
         if not portfolio: return
         total_portfolio_value = Decimal('0.0')
         total_portfolio_cost = Decimal('0.0')
@@ -134,14 +128,14 @@ class PortfolioAssetsViewSet(viewsets.ModelViewSet):
             Deals.objects.create(
                 portfolio=portfolio_asset.portfolio,
                 asset=portfolio_asset.asset,
-                address="Position Change", # Или другое подходящее описание
+                address="Position Change",
                 status="Completed",
                 type=is_buy,
                 quantity=quantity,
-                price=price.quantize(Decimal("0.0001")), # Сохраняем цену с 4 знаками
+                price=price.quantize(Decimal("0.0001")),
                 total=total,
-                commission=Decimal('0.00'), # По умолчанию 0
-                tax=Decimal('0.00'),        # По умолчанию 0
+                commission=Decimal('0.00'),
+                tax=Decimal('0.00'),
                 date=timezone.now()
             )
             logger.info(f"Created {'BUY' if is_buy else 'SELL'} Deal for Asset {portfolio_asset.asset.ticker} Qty: {quantity} Price: {price}")
@@ -181,12 +175,11 @@ class PortfolioAssetsViewSet(viewsets.ModelViewSet):
             except InvalidOperation: errors['price'] = "Invalid price format."
         if errors: return Response(errors, status=status.HTTP_400_BAD_REQUEST)
 
-        portfolio_asset = None # Объявляем переменную заранее
-        created = False       # Объявляем переменную заранее
+        portfolio_asset = None
+        created = False
 
         try:
             with transaction.atomic():
-                # Блокируем портфель для обновления
                 portfolio = Portfolios.objects.select_for_update().get(Port_ID=portfolio_id, user=request.user)
                 asset = Assets.objects.get(Asset_ID=asset_id)
 
@@ -214,13 +207,9 @@ class PortfolioAssetsViewSet(viewsets.ModelViewSet):
 
                 portfolio_asset.save(update_fields=['quantity', 'average_price'])
 
-                # --- СОЗДАНИЕ СДЕЛКИ ПОСЛЕ СОХРАНЕНИЯ PortfolioAsset ---
-                # Количество для сделки - это то количество, которое было добавлено в этом запросе
-                # Цена для сделки - это цена из этого запроса
                 self._create_deal_from_pa_change(portfolio_asset, quantity_dec, price_dec, is_buy=True)
                 # -------------------------------------------------------
 
-            # Пересчет агрегатов ПОСЛЕ завершения транзакции
             self.recalculate_portfolio_aggregates(portfolio)
 
             portfolio_asset.refresh_from_db()
@@ -233,37 +222,27 @@ class PortfolioAssetsViewSet(viewsets.ModelViewSet):
              logger.exception(f"Error in PortfolioAssetsViewSet.create for portfolio {portfolio_id}, asset {asset_id}")
              return Response({"detail": f"An internal error occurred: {e}"}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # --- НОВЫЙ МЕТОД: perform_destroy ---
     def perform_destroy(self, instance):
         """Переопределяем для создания сделки продажи перед удалением."""
         portfolio = instance.portfolio # Получаем портфель ДО удаления
         asset_ticker = instance.asset.ticker # Получаем тикер ДО удаления
         quantity_to_sell = instance.quantity # Количество для продажи
-        # Используем среднюю цену как цену продажи (можно улучшить)
+
         sell_price = instance.average_price or Decimal('0.00')
 
         try:
-            # Создаем сделку продажи ПЕРЕД удалением
             self._create_deal_from_pa_change(instance, quantity_to_sell, sell_price, is_buy=False)
 
-            # Выполняем стандартное удаление
             instance.delete()
 
-            # Пересчитываем агрегаты ПОСЛЕ удаления
             self.recalculate_portfolio_aggregates(portfolio)
             logger.info(f"Deleted PortfolioAsset for {asset_ticker} in portfolio {portfolio.Port_ID} and recalculated aggregates.")
 
         except Exception as e:
             logger.error(f"Error during perform_destroy for PortfolioAsset {instance.ID}: {e}", exc_info=True)
-            # Возможно, стоит не удалять объект, если создание сделки не удалось,
-            # или как-то иначе обработать ошибку, чтобы не потерять данные.
-            # Пока просто логируем и позволяем удалению произойти (если оно еще не произошло)
-            # В production нужно более надежное решение.
-            # Перевыбрасываем исключение, чтобы DRF вернул ошибку 500
             raise serializers.ValidationError(f"Ошибка при удалении актива и создании сделки: {e}")
 
 
-# --- DealsViewSet - ОСТАЕТСЯ БЕЗ ИЗМЕНЕНИЙ (но TODO остаются) ---
 class DealsViewSet(viewsets.ModelViewSet):
     serializer_class = DealsSerializer
     permission_classes = [permissions.IsAuthenticated]
@@ -274,13 +253,12 @@ class DealsViewSet(viewsets.ModelViewSet):
 
     def update_portfolio_assets_from_deal(self, deal_instance):
         logger.warning(f"Function update_portfolio_assets_from_deal not fully implemented for Deal ID: {deal_instance.Deal_ID}")
-        # !!! IMPLEMENT LOGIC TO UPDATE PortfolioAssets BASED ON THE DEAL !!!
+
         pass
 
     def recalculate_portfolio_aggregates(self, portfolio):
          if not portfolio: return
          logger.info(f"Recalculating aggregates in DealsViewSet for Portfolio ID: {portfolio.Port_ID}")
-         # Вызываем метод другого ViewSet - не лучший подход, лучше вынести в сервис
          try:
              pa_viewset = PortfolioAssetsViewSet()
              pa_viewset.recalculate_portfolio_aggregates(portfolio)
@@ -305,9 +283,8 @@ class DealsViewSet(viewsets.ModelViewSet):
         try:
             portfolio = Portfolios.objects.get(Port_ID=portfolio_pk, user=self.request.user)
             deal_instance = serializer.save(portfolio=portfolio)
-            # !!! ВАЖНО: Эти вызовы ДОЛЖНЫ БЫТЬ РЕАЛИЗОВАНЫ !!!
-            self.update_portfolio_assets_from_deal(deal_instance) # Сначала обновляем актив
-            self.recalculate_portfolio_aggregates(portfolio)     # Потом пересчитываем портфель
+            self.update_portfolio_assets_from_deal(deal_instance)
+            self.recalculate_portfolio_aggregates(portfolio)
             # -----------------------------------------------------
             logger.info(f"Deal {deal_instance.Deal_ID} created for portfolio {portfolio_pk}. Aggregates updated (TODO: Verify logic).")
         except Portfolios.DoesNotExist:
@@ -318,8 +295,6 @@ class DealsViewSet(viewsets.ModelViewSet):
 
     # TODO: Override perform_update & perform_destroy для сделок
 
-
-# --- AuthUserViewSet - БЕЗ ИЗМЕНЕНИЙ ---
 class AuthUserViewSet(viewsets.ModelViewSet):
     queryset = User.objects.all()
     serializer_class = AuthUserSerializer

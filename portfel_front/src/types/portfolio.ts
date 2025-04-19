@@ -36,26 +36,25 @@ export interface Asset {
     pb_ratio: string | null;
     beta: string | null;
     current_price: string | null;
-    asset_type_name: string; // Убедитесь, что это поле здесь есть
+    asset_type_name: string;
     asset_type_id?: number;
-    // Если приходит весь объект asset_type:
     asset_type: number;
 }
 
 export interface Deal {
     Deal_ID: number;
-    portfolio: number; // ID портфеля
-    asset: number;     // ID актива (как приходит из DealsSerializer)
-    asset_ticker?: string; // Тикер актива (read_only из DealsSerializer)
+    portfolio: number;
+    asset: number;
+    asset_ticker?: string;
     address: string;
     status: string;
-    type: boolean; // true=BUY, false=SELL
-    quantity: string; // Используем строку, т.к. DecimalField может приходить как строка
+    type: boolean;
+    quantity: string;
     price: string;
     total: string;
     commission: string;
     tax: string;
-    date: string; // Дата в виде строки ISO
+    date: string; 
 }
 
 export interface User {

@@ -76,7 +76,6 @@ const Header = () => {
                     PORTFOLIO MANAGER
                 </Typography>
 
-                {/* Десктопное меню */}
                 <Box sx={{ display: { xs: 'none', md: 'flex' }, alignItems: 'center' }}>
                     {user ? (
                         <>
@@ -139,7 +138,6 @@ const Header = () => {
                     )}
                 </Box>
 
-                {/* Мобильное меню */}
                 <Box sx={{ display: { xs: 'flex', md: 'none' } }}>
                     <IconButton
                         size="large"

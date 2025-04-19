@@ -6,7 +6,6 @@ interface AssetTableProps {
     assets: PortfolioAsset[];
 }
 
-// Утилитарная функция для безопасного парсинга и форматирования
 const safeParseDecimal = (value: string | number | null | undefined): number => {
     if (value === null || value === undefined) return NaN;
     const num = typeof value === 'number' ? value : parseFloat(value);
@@ -38,27 +37,15 @@ const AssetTable = ({ assets }: AssetTableProps) => {
                 </TableHead>
                 <TableBody>
                     {assets.map((pa) => {
-                        // Безопасное извлечение и парсинг значений
                         const quantityNum = safeParseDecimal(pa.quantity);
                         const avgPriceNum = safeParseDecimal(pa.average_price);
-                        const currentPriceNum = safeParseDecimal(pa.asset?.current_price); // Используем optional chaining
-                        const totalValueNum = safeParseDecimal(pa.total_value); // Используем значение из API, если оно верное
+                        const currentPriceNum = safeParseDecimal(pa.asset?.current_price);
+                        const totalValueNum = safeParseDecimal(pa.total_value);
 
-                        // Расчет текущей стоимости и P/L, если все данные есть
                         const calculatedCurrentValue = (!isNaN(quantityNum) && !isNaN(currentPriceNum))
                             ? quantityNum * currentPriceNum
                             : NaN;
 
-                        // Используем total_value из API если оно есть, иначе расчитываем cost basis
-                        // const costBasis = (!isNaN(quantityNum) && !isNaN(avgPriceNum))
-                        //     ? quantityNum * avgPriceNum
-                        //     : NaN;
-                        // const profitLoss = (!isNaN(calculatedCurrentValue) && !isNaN(costBasis))
-                        //     ? calculatedCurrentValue - costBasis
-                        //     : NaN;
-
-                        // Расчет P/L на основе total_value из API (если оно представляет cost basis)
-                        // ИЛИ если total_value это текущая стоимость, а average_price - цена покупки
                         const profitLoss = (!isNaN(calculatedCurrentValue) && !isNaN(quantityNum) && !isNaN(avgPriceNum))
                             ? calculatedCurrentValue - (quantityNum * avgPriceNum)
                             : NaN;

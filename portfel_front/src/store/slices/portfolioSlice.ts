@@ -1,4 +1,3 @@
-// src/store/slices/portfolioSlice.ts
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import { portfolioApi } from '../../api/portfolio';
 import { apiClient } from '../../api/index';

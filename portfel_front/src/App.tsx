@@ -6,7 +6,6 @@ import Dashboard from './pages/Dashboard';
 import {store} from "./store/store";
 import CssBaseline from '@mui/material/CssBaseline';
 import theme from './theme';
-// import PortfolioDetail from './pages/PortfolioDetail';
 import AuthPage from './pages/Auth';
 import PortfolioDetail from './pages/PortfolioPage'
 import AssetDetailPage from './pages/AssetDetailPage';
